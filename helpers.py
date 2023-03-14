@@ -1,18 +1,147 @@
 import numpy as np
+import scipy
 import collections
 from collections import defaultdict, OrderedDict
 from transformers import Trainer, EvalPrediction
 from transformers.trainer_utils import PredictionOutput
 from typing import Tuple
+import json
 from tqdm.auto import tqdm
 
 QA_MAX_ANSWER_LENGTH = 30
 
+def stat_test(train_dataset, tokenizer, outFile, outFile2):
+    i = 0
+    word_count_per_class = dict()
+    for sample in train_dataset:
+        process_dataset_nli(word_count_per_class, sample, tokenizer)
+        i+=1
+        if (i%1000==0):
+            print(i)
+    # train_dataset.map(lambda exs: process_dataset_nli(word_count_per_class, exs, tokenizer), batched=True, num_proc=NUM_PREPROCESSING_WORKERS)
+    print(len(word_count_per_class))
+    biased_words = []
+    biased_words_labels = dict()
+    alpha = 0.01/len(word_count_per_class)
+    z_scores = dict()
+    for word in word_count_per_class:
+        counts = word_count_per_class[word]
+        z_scores[word] = dict()
+        n = counts[0] + counts[1] + counts[2]
+        if (n<20):
+            continue
+        for label in counts:
+            p_hat = counts[label]/n
+            p0 = 1/3
+            zScore = (p_hat - p0)/(np.sqrt(p0*(1-p0)/n))
+            z_scores[word][label] = zScore
+            p_value = scipy.stats.norm.sf(abs(zScore))
+            if (p_value < alpha):
+                biased_words.append(word)
+    for word in biased_words:
+        highLabel = 0
+        if (z_scores[word][1] > z_scores[word][0]):
+            highLabel = 1
+        if (z_scores[word][2] > z_scores[word][highLabel]):
+            highLabel = 2
+        biased_words_labels[word] = highLabel
+    write_stat_test_dataset(biased_words_labels, z_scores, outFile, outFile2)
+    print("biased: " + str(len(biased_words)))
+    return [word_count_per_class, z_scores]
 
+def write_stat_test_dataset(biased_words, z_scores, outFile, outFile2):
+    class_scores = [dict(), dict(), dict()]
+    for word in biased_words:
+        class_scores[biased_words[word]][word] = z_scores[word][biased_words[word]]
+    class_samples = []
+    # premise = []
+    # hypothesis = []
+    # class_labels = []
+    # class_labels2 = []
+
+    fileOutput1 = []
+    fileOutput2 = []
+    for label in range(3):
+        # print(class_scores[label].items())
+        sorted_words = sorted(class_scores[label].items(), key=lambda kv: kv[1])
+        if (len(sorted_words) < 100):
+            print("Less words for class" + str(label))
+        top_50 = sorted_words[:50]
+        bottom_50 = sorted_words[-50:]
+        class_samples.append([top_50, bottom_50])
+        for word in top_50: 
+            d1 = {'premise': word[0], 'hypothesis': "", 'label': label}
+            d2 = {'premise': "", 'hypothesis': word[0], 'label': label}
+            fileOutput1.append(d1)
+            fileOutput1.append(d2)
+            d1 = {'premise': word[0], 'hypothesis': "", 'label': label+1}
+            d2 = {'premise': "", 'hypothesis': word[0], 'label': label+1}
+            fileOutput2.append(d1)
+            fileOutput2.append(d2)
+            # premise.append(word[0])
+            # hypothesis.append("")
+            # premise.append("")
+            # hypothesis.append(word[0])
+            # class_labels.append(label)
+            # class_labels.append(label)
+            # class_labels2.append(label+1)
+            # class_labels2.append(label+1)
+        for word in bottom_50:
+            d1 = {'premise': word[0], 'hypothesis': "", 'label': label}
+            d2 = {'premise': "", 'hypothesis': word[0], 'label': label}
+            fileOutput1.append(d1)
+            fileOutput1.append(d2)
+            d1 = {'premise': word[0], 'hypothesis': "", 'label': -1*(label+1)}
+            d2 = {'premise': "", 'hypothesis': word[0], 'label': -1*(label+1)}
+            fileOutput2.append(d1)
+            fileOutput2.append(d2)
+
+            # premise.append(word[0])
+            # hypothesis.append("")
+            # premise.append("")
+            # hypothesis.append(word[0])
+            # class_labels.append(label)
+            # class_labels.append(label)
+            # class_labels2.append(-1*(label+1))
+            # class_labels2.append(-1*(label+1))
+
+    with open(outFile, 'w') as file:
+        json_string = json.dumps(fileOutput1)
+        print(json_string, file=file)
+    with open(outFile2, 'w') as file:
+        json_string = json.dumps(fileOutput2)
+        print(json_string, file=file)
+    
+def abs_val_label(example):
+    example["label"] = abs(example["label"])-1
+    return example
+def process_dataset_nli(word_count_per_class_dict, examples, tokenizer):
+    # max_seq_length = tokenizer.model_max_length if max_seq_length is None else max_seq_length
+
+    normalizer = tokenizer.backend_tokenizer.normalizer
+    pre_tokenizer = tokenizer.backend_tokenizer.pre_tokenizer
+    # print(examples)    
+    for strType in ['premise', 'hypothesis']:
+        curSet = examples[strType]
+        temp = curSet
+        # for index, temp in enumerate(curSet):
+        temp = normalizer.normalize_str(temp)
+        temp = pre_tokenizer.pre_tokenize_str(temp)
+        # print(temp)
+        temp = map(lambda x: x[0], temp) # Extract words only - we don't care about the offsets
+        # print(temp)
+        for word in temp:
+            curVal = word_count_per_class_dict.get(word, {0:0, 1:0, 2:0})
+            curVal[examples['label']] += 1;
+            # print(curVal)
+            word_count_per_class_dict[word] = curVal
+    # print(word_count_per_class_dict)
+    return
 # This function preprocesses an NLI dataset, tokenizing premises and hypotheses.
 def prepare_dataset_nli(examples, tokenizer, max_seq_length=None):
     max_seq_length = tokenizer.model_max_length if max_seq_length is None else max_seq_length
 
+    print(examples)
     tokenized_examples = tokenizer(
         examples['premise'],
         examples['hypothesis'],

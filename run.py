@@ -2,9 +2,12 @@ import datasets
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, \
     AutoModelForQuestionAnswering, Trainer, TrainingArguments, HfArgumentParser
 from helpers import prepare_dataset_nli, prepare_train_dataset_qa, \
-    prepare_validation_dataset_qa, QuestionAnsweringTrainer, compute_accuracy
+    prepare_validation_dataset_qa, QuestionAnsweringTrainer, compute_accuracy, \
+    process_dataset_nli, stat_test, abs_val_label
 import os
 import json
+from torch.nn import functional as F
+import torch
 
 NUM_PREPROCESSING_WORKERS = 2
 
@@ -46,6 +49,10 @@ def main():
                       help='Limit the number of examples to train on.')
     argp.add_argument('--max_eval_samples', type=int, default=None,
                       help='Limit the number of examples to evaluate on.')
+    argp.add_argument('--out_file', type=str, default="",help='Path/Name for file to dump the statistical test dataset in')
+    argp.add_argument('--out_file2', type=str, default="",help='Path/Name for file to dump the statistical test dataset in with differential labels')
+    argp.add_argument('--model_stat_test', type=bool, default=False, help='Whether to run the stat test on the model - specify the data file using dataset tag as usual. Need to specify pretrained model')
+    argp.add_argument('--test_label', type=int, default=1, help="test label for which class we want to work with during model_stat_test")
 
     training_args, args = argp.parse_args_into_dataclasses()
 
@@ -102,18 +109,28 @@ def main():
     eval_dataset = None
     train_dataset_featurized = None
     eval_dataset_featurized = None
+    # process_train_dataset = process_eval_dataset = \
+            # lambda exs: process_dataset_nli(word_count_per_class, exs, tokenizer)
     if training_args.do_train:
         train_dataset = dataset['train']
         if args.max_train_samples:
             train_dataset = train_dataset.select(range(args.max_train_samples))
+        if not args.model_stat_test:
+            [word_count_per_class, z_scores] = stat_test(train_dataset, tokenizer, args.out_file, args.out_file2)
+            return
         train_dataset_featurized = train_dataset.map(
             prepare_train_dataset,
             batched=True,
             num_proc=NUM_PREPROCESSING_WORKERS,
             remove_columns=train_dataset.column_names
         )
+    # Change label as required
+    test_label = 1
     if training_args.do_eval:
         eval_dataset = dataset[eval_split]
+        if (args.model_stat_test):
+            eval_dataset = eval_dataset.filter(lambda example: example["label"]==test_label)
+            eval_dataset = eval_dataset.map(lambda example: abs_val_label(example))
         if args.max_eval_samples:
             eval_dataset = eval_dataset.select(range(args.max_eval_samples))
         eval_dataset_featurized = eval_dataset.map(
@@ -139,7 +156,7 @@ def main():
             predictions=eval_preds.predictions, references=eval_preds.label_ids)
     elif args.task == 'nli':
         compute_metrics = compute_accuracy
-    
+
 
     # This function wraps the compute_metrics function, storing the model's predictions
     # so that they can be dumped along with the computed metrics
@@ -158,6 +175,24 @@ def main():
         tokenizer=tokenizer,
         compute_metrics=compute_metrics_and_store_predictions
     )
+
+    if args.model_stat_test:
+        # Change label as required
+        test_label = 1
+        # eval_dataset = eval_dataset.filter(lambda example: example["label"]==test_label)
+        print("Here")
+        results = trainer.evaluate(**eval_kwargs)
+        os.makedirs(training_args.output_dir, exist_ok=True)
+        prob = 0.
+        for i, example in enumerate(eval_dataset):
+            torch_preds = torch.from_numpy(eval_predictions.predictions[i])
+            probs = F.softmax(torch_preds, dim = -1).numpy()
+            print(str(probs))
+            prob += probs[abs(test_label)-1]
+        prob /= 2.
+        print(str(prob) + " " + str(len(eval_dataset)))
+        return
+
     # Train and/or evaluate
     if training_args.do_train:
         trainer.train()
@@ -202,7 +237,6 @@ def main():
                     example_with_prediction['predicted_label'] = int(eval_predictions.predictions[i].argmax())
                     f.write(json.dumps(example_with_prediction))
                     f.write('\n')
-
 
 if __name__ == "__main__":
     main()
