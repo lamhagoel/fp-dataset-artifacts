@@ -137,11 +137,13 @@ def write_stat_test_dataset(biased_words, z_scores, outFile, outFile2):
             # class_labels2.append(-1*(label+1))
 
     with open(outFile, 'w') as file:
-        json_string = json.dumps(fileOutput1)
-        print(json_string, file=file)
+        for line in fileOutput1:
+            json_string = json.dumps(line)
+            print(json_string, file=file)
     with open(outFile2, 'w') as file:
-        json_string = json.dumps(fileOutput2)
-        print(json_string, file=file)
+        for line in fileOutput2:
+            json_string = json.dumps(line)
+            print(json_string, file=file)
     
 def abs_val_label(example):
     example["label"] = abs(example["label"])-1
