@@ -3,11 +3,12 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification, \
     AutoModelForQuestionAnswering, Trainer, TrainingArguments, HfArgumentParser
 from helpers import prepare_dataset_nli, prepare_train_dataset_qa, \
     prepare_validation_dataset_qa, QuestionAnsweringTrainer, compute_accuracy, \
-    process_dataset_nli, stat_test, abs_val_label
+    process_dataset_nli, stat_test, abs_val_label, augment_train_set
 import os
 import json
 from torch.nn import functional as F
 import torch
+from textattack.augmentation import EasyDataAugmenter, DeletionAugmenter
 
 NUM_PREPROCESSING_WORKERS = 2
 
@@ -51,8 +52,10 @@ def main():
                       help='Limit the number of examples to evaluate on.')
     argp.add_argument('--out_file', type=str, default="",help='Path/Name for file to dump the statistical test dataset in')
     argp.add_argument('--out_file2', type=str, default="",help='Path/Name for file to dump the statistical test dataset in with differential labels')
+    argp.add_argument('--stat_test', type=bool, default=False, help='Whether to run the stat test on the data')
     argp.add_argument('--model_stat_test', type=bool, default=False, help='Whether to run the stat test on the model - specify the data file using dataset tag as usual. Need to specify pretrained model')
     argp.add_argument('--test_label', type=int, default=1, help="test label for which class we want to work with during model_stat_test")
+    argp.add_argument('--augment', type=str, default=None, help='Whether we should augment data adversarially using TextAttack')
 
     training_args, args = argp.parse_args_into_dataclasses()
 
@@ -115,9 +118,26 @@ def main():
         train_dataset = dataset['train']
         if args.max_train_samples:
             train_dataset = train_dataset.select(range(args.max_train_samples))
-        if not args.model_stat_test:
+        if args.stat_test:
             [word_count_per_class, z_scores] = stat_test(train_dataset, tokenizer, args.out_file, args.out_file2)
             return
+        if args.augment is not None:
+            if args.augment not in ["delete", "easy"]:
+                print("Unsupported augmenter")
+                return
+            if args.augment == "delete":
+                augmenter = DeletionAugmenter()
+            else:
+                augmenter = EasyDataAugmenter()
+            augment_function = lambda exs: augment_train_set(exs, augmenter)
+            print("Before augment: " + str(len(train_dataset)))
+            train_dataset = train_dataset.map(
+                augment_function,
+                batched=True,
+                # num_proc=NUM_PREPROCESSING_WORKERS,
+                # remove_columns=train_dataset.column_names
+                )
+            print("After augment: " + str(len(train_dataset)))
         train_dataset_featurized = train_dataset.map(
             prepare_train_dataset,
             batched=True,

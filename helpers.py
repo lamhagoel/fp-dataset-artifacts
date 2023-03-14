@@ -10,6 +10,37 @@ from tqdm.auto import tqdm
 
 QA_MAX_ANSWER_LENGTH = 30
 
+def augment_train_set(examples, augmenter):
+    # print("here")
+    all_premises = [] + examples['premise']
+    all_hyp = [] + examples['hypothesis']
+    all_labels = [] + examples['label']
+    # print(len(examples['premise']))
+    # print("Ex:" + str(examples['premise']))
+    # return
+    for i, example in enumerate(examples['premise']):
+        # print(i, examples['premise'])
+        premises = augmenter.augment(example)
+        all_premises += premises
+        all_hyp += [examples['hypothesis'][i] for j in range(len(premises))]
+        all_labels += [examples['label'][i] for j in range(len(premises))]
+    # print("part 1")
+    for i, example in enumerate(examples['hypothesis']):
+        hypothesis = augmenter.augment(example)
+        all_premises += [examples['premise'][i] for j in range(len(hypothesis))]
+        all_hyp += hypothesis
+        all_labels += [examples['label'][i] for j in range(len(hypothesis))]
+
+        # all_premises += [example['premise']] + premises + [example['premise'] for i in range(len(hypothesis))]
+        # all_hyp += [example[hypothesis]] + hypothesis + [example['hypothesis'] for i in range(len(premises))]
+        # all_labels += [example[label] for i in range(1+len(premises)+len(hypothesis))]
+
+    # print("done")
+    return {'premise' : all_premises, 'hypothesis': all_hyp, 'label': all_labels}
+
+    # [example] + [{'premise': premises[i], 'hypothesis': example['hypothesis'], 'label': example['label']} for i in range(len(premises))] \
+    # + [{'premise': example['premise'], 'hypothesis': hypothesis[i], 'label': example['label']} for i in range(len(hypothesis))]
+
 def stat_test(train_dataset, tokenizer, outFile, outFile2):
     i = 0
     word_count_per_class = dict()
@@ -141,7 +172,7 @@ def process_dataset_nli(word_count_per_class_dict, examples, tokenizer):
 def prepare_dataset_nli(examples, tokenizer, max_seq_length=None):
     max_seq_length = tokenizer.model_max_length if max_seq_length is None else max_seq_length
 
-    print(examples)
+    # print(examples)
     tokenized_examples = tokenizer(
         examples['premise'],
         examples['hypothesis'],
