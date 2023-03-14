@@ -125,7 +125,7 @@ def main():
             remove_columns=train_dataset.column_names
         )
     # Change label as required
-    test_label = 1
+    test_label = args.test_label
     if training_args.do_eval:
         eval_dataset = dataset[eval_split]
         if (args.model_stat_test):
@@ -178,7 +178,7 @@ def main():
 
     if args.model_stat_test:
         # Change label as required
-        test_label = 1
+        test_label = args.test_label
         # eval_dataset = eval_dataset.filter(lambda example: example["label"]==test_label)
         print("Here")
         results = trainer.evaluate(**eval_kwargs)
