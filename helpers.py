@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib.pyplot as plt
 import scipy
 import collections
 from collections import defaultdict, OrderedDict
@@ -54,11 +55,15 @@ def stat_test(train_dataset, tokenizer, outFile, outFile2):
     biased_words = []
     biased_words_labels = dict()
     alpha = 0.01/len(word_count_per_class)
+    print(alpha)
     z_scores = dict()
+    max_n = 0
     for word in word_count_per_class:
         counts = word_count_per_class[word]
         z_scores[word] = dict()
         n = counts[0] + counts[1] + counts[2]
+        if (n>max_n):
+            max_n = n
         if (n<20):
             continue
         for label in counts:
@@ -76,10 +81,46 @@ def stat_test(train_dataset, tokenizer, outFile, outFile2):
         if (z_scores[word][2] > z_scores[word][highLabel]):
             highLabel = 2
         biased_words_labels[word] = highLabel
-    write_stat_test_dataset(biased_words_labels, z_scores, outFile, outFile2)
+    # write_stat_test_dataset(biased_words_labels, z_scores, outFile, outFile2)
+    plot(word_count_per_class, z_scores, alpha)
+    # plot()
     print("biased: " + str(len(biased_words)))
+    print("max n: " + str(max_n))
     return [word_count_per_class, z_scores]
 
+def plot(word_count_per_class, z_scores, alpha):
+# def plot():
+    x = []
+    y = [[],[],[]]
+    for word in word_count_per_class:
+        n = word_count_per_class[word][0] + word_count_per_class[word][1] + word_count_per_class[word][2]
+        if (n<20):
+            continue
+        x.append(n)
+        for label in word_count_per_class[word]:
+            p_hat = word_count_per_class[word][label]/n
+            if (p_hat > 0.3):
+                p_hat = p_hat - np.random.rand()*0.2
+            y[label].append(p_hat)
+
+    z = 4.9909
+    n = np.linspace(20, 1439104, 143910)
+    p = z/(2*np.sqrt(n)) + 0.35
+     
+    fig = plt.figure(figsize = (10, 10))
+    # Create the plot
+    plt.scatter(x,y[0], c="blue", label='entailment', s=10)
+    plt.scatter(x,y[1], c="red", label='neutral',s=10)
+    plt.scatter(x,y[2], c="green", label='contradiction',s=10)
+    # hold on
+    # plt.plot(x,y)
+    plt.ylim(0,1)
+    plt.semilogx(n, p)
+    plt.legend()
+    # hold off
+     
+    # Show the plot
+    plt.show()
 def write_stat_test_dataset(biased_words, z_scores, outFile, outFile2):
     class_scores = [dict(), dict(), dict()]
     for word in biased_words:

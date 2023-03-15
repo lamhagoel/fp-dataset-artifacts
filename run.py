@@ -118,9 +118,6 @@ def main():
         train_dataset = dataset['train']
         if args.max_train_samples:
             train_dataset = train_dataset.select(range(args.max_train_samples))
-        if args.stat_test:
-            [word_count_per_class, z_scores] = stat_test(train_dataset, tokenizer, args.out_file, args.out_file2)
-            return
         if args.augment is not None:
             if args.augment not in ["delete", "easy"]:
                 print("Unsupported augmenter")
@@ -138,6 +135,9 @@ def main():
                 # remove_columns=train_dataset.column_names
                 )
             print("After augment: " + str(len(train_dataset)))
+        if args.stat_test:
+            [word_count_per_class, z_scores] = stat_test(train_dataset, tokenizer, args.out_file, args.out_file2)
+            return
         train_dataset_featurized = train_dataset.map(
             prepare_train_dataset,
             batched=True,
