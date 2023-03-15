@@ -105,7 +105,7 @@ def plot(word_count_per_class, z_scores, alpha):
 
     z = 4.9909
     n = np.linspace(20, 1439104, 143910)
-    p = z/(2*np.sqrt(n)) + 0.35
+    p = z/(2*np.sqrt(n)) + 0.5
      
     fig = plt.figure(figsize = (10, 10))
     # Create the plot
